@@ -6,7 +6,8 @@ import numpy as np
 
 def set_gpu(gpu=None):
     """Sets GPU device if provided."""
-    assert isinstance(gpu, int)
+    # TODO(ruthfong): Figure out right assert.
+    # assert isinstance(gpu, int)
     if gpu:
         caffe.set_device(gpu)
 
@@ -56,7 +57,7 @@ def get_caffe_model(prototxt_path,
 
 
 def net_forward(net, img_paths, transformer=None):
-    """
+    """Do a forward pass through a caffe network.
 
     Args:
         net (:class:`caffe.Net`): caffe network.
@@ -65,7 +66,9 @@ def net_forward(net, img_paths, transformer=None):
             transformer to handle data preprocessing.
 
     Returns:
-        :class:`caffe.Net`: caffe network after forward pass.
+        tuple: tuple containing:
+          - :caffe:`caffe.Net`: caffe network after forward pass
+          - dict: results from forward pass
     """
     if not transformer:
         transformer = get_imagenet_transformer(net)
@@ -88,6 +91,6 @@ def net_forward(net, img_paths, transformer=None):
             net.blobs['data'].data[i, ...] = transformer.preprocess('data',
                                                                     img)
 
-    net.forward()
+    res = net.forward()
 
-    return net
+    return net, res

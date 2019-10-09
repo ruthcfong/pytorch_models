@@ -185,8 +185,9 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
     torch_res = torch_net(x)
 
     # Check maximum difference.
-    max_diff = (torch_res.cpu().data.numpy() - torch_res[caffe_key].data).max()
-    print('Max Diff (' + caffe_key + '): ' + max_diff)
+    max_diff = (torch_res.cpu().data.numpy() - caffe_res[caffe_key]).max()
+
+    print('Max Diff (' + caffe_key + '): ' + str(max_diff))
     assert max_diff < max_diff_threshold
 
     # Save path.
