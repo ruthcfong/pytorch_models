@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torchvision.models.utils import load_state_dict_from_url
 
@@ -9,52 +8,61 @@ model_urls = {
 }
 
 
-class AlexNetPuzzle(nn.Module):
-    def __init__(self, params=None):
-        super(AlexNetPuzzle, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 96, kernel_size=11, stride=4),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.LocalResponseNorm(5, alpha=0.0001, beta=0.75),
-            nn.Conv2d(96, 256, kernel_size=5, groups=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.LocalResponseNorm(5, alpha=0.0001, beta=0.75),
-            nn.Conv2d(256, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 384, kernel_size=3, groups=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 256, kernel_size=3, groups=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2)
-        )
-        if params:
-            self.load_caffe_weights(params)
+class AlexNet(nn.Module):
+    def __init__(self, features=None, task_name=None):
+        super(AlexNet, self).__init__()
+        self.task_name = task_name
+        if features is not None and task_name is None:
+            self.features = features
+        elif task_name is not None and features is None:
+            self.set_features()
+        else:
+            assert False
+
+    def set_features(self):
+        assert self.task_name is not None
+        if self.task_name == PUZZLE:
+            self.features = nn.Sequential(*[
+                nn.Conv2d(3, 96, kernel_size=(11, 11), stride=(4, 4)),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=0, dilation=1,
+                             ceil_mode=True),
+                nn.LocalResponseNorm(5, alpha=9.99999974738e-05, beta=0.75,
+                                     k=1.0),
+                nn.Conv2d(96, 256, kernel_size=(5, 5), stride=(1, 1),
+                          padding=(2, 2), groups=2),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=0, dilation=1,
+                             ceil_mode=True),
+                nn.LocalResponseNorm(5, alpha=9.99999974738e-05, beta=0.75,
+                                     k=1.0),
+                nn.Conv2d(256, 384, kernel_size=(3, 3), stride=(1, 1),
+                          padding=(1, 1)),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(384, 384, kernel_size=(3, 3), stride=(1, 1),
+                          padding=(1, 1), groups=2),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(384, 256, kernel_size=(3, 3), stride=(1, 1),
+                          padding=(1, 1), groups=2),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=0, dilation=1,
+                             ceil_mode=True),
+            ])
+        else:
+            raise NotImplementedError
 
     def forward(self, x):
         return self.features(x)
-
-    def load_caffe_weights(self, params):
-        self.features[0].weight.data[...] = torch.from_numpy(params['conv1_s1'][0].data)
-        self.features[0].bias.data[...] = torch.from_numpy(params['conv1_s1'][1].data)
-        self.features[4].weight.data[...] = torch.from_numpy(params['conv2_s1'][0].data)
-        self.features[4].bias.data[...] = torch.from_numpy(params['conv2_s1'][1].data)
-        self.features[8].weight.data[...] = torch.from_numpy(params['conv3_s1'][0].data)
-        self.features[8].bias.data[...] = torch.from_numpy(params['conv3_s1'][1].data)
-        self.features[10].weight.data[...] = torch.from_numpy(params['conv4_s1'][0].data)
-        self.features[10].bias.data[...] = torch.from_numpy(params['conv4_s1'][1].data)
-        self.features[12].weight.data[...] = torch.from_numpy(params['conv5_s1'][0].data)
-        self.features[12].bias.data[...] = torch.from_numpy(params['conv5_s1'][1].data)
 
 
 def alexnet(task_name=PUZZLE,
             pretrained=False,
             progress=True,
             **kwargs):
-    assert task_name is PUZZLE
     if task_name is PUZZLE:
-        model = AlexNetPuzzle(**kwargs)
+        model = AlexNet(features=None, task_name=task_name, **kwargs)
+    else:
+        raise NotImplementedError
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[task_name],
                                               progress=progress)
