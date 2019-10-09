@@ -12,18 +12,22 @@ def set_gpu(gpu=None):
         caffe.set_device(gpu)
 
 
-def get_imagenet_mean(verbose=False):
+def get_imagenet_mean():
     """Returns 1D array of length 3 with the mean BGR value for ImageNet."""
     # TODO(ruthfong): Figure out the right path.
-    mu = np.load('./data/ilsvrc_2012_mean.npy')
-    mu = mu.mean(1).mean(1)
-    if verbose:
-        print('mean-subtracted values: ' + zip('BGR', mu))
-    return mu
+    # From here: https://github.com/CSAILVision/NetDissect/blob/release1/script/rundissect.sh#L165
+    return np.array([109.5388, 118.6897, 124.6901])
+    if False:
+        mu = np.load('./data/ilsvrc_2012_mean.npy')
+        mu = mu.mean(1).mean(1)
+        if verbose:
+            print('mean-subtracted values: ' + zip('BGR', mu))
+        return mu
 
 
 def get_imagenet_transformer(net):
     """Returns :class:`caffe.io.Transformer` for ImageNet preprocessing."""
+    # TODO(ruthfong): Compare to https://github.com/CSAILVision/NetDissect/blob/release1/src/loadseg.py#L623-L638
     transformer = caffe.io.Transformer({'data':net.blobs['data'].data.shape})
     transformer.set_transpose('data', (2,0,1))
     mu = get_imagenet_mean()
