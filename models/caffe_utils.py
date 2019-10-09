@@ -13,7 +13,8 @@ def set_gpu(gpu=None):
 
 def get_imagenet_mean(verbose=False):
     """Returns 1D array of length 3 with the mean BGR value for ImageNet."""
-    mu = np.load('../ilsvrc_2012_mean.npy')
+    # TODO(ruthfong): Figure out the right path.
+    mu = np.load('./data/ilsvrc_2012_mean.npy')
     mu = mu.mean(1).mean(1)
     if verbose:
         print('mean-subtracted values: ' + zip('BGR', mu))

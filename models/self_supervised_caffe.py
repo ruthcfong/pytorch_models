@@ -6,7 +6,8 @@ import caffe_utils as cutils
 from .self_supervised import PUZZLE
 
 DEFAULT_CAFFE_MODELS_DIR = '/scratch/local/ssd/ruthfong/models/net_dissect/caffe'
-DEFAULT_IMG_PATH = '../dog_cat.jpeg'
+# TODO(ruthfong): Figure out how to specify the path correctly.
+DEFAULT_IMG_PATH = './data/dog_cat.jpeg'
 
 
 def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
