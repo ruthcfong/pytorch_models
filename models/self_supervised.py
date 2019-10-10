@@ -29,6 +29,11 @@ class Power(nn.Module):
     def forward(self, x):
         return (self.shift + self.scale * x) ** self.power
 
+    def __str__(self):
+        return 'Power(power={},scale={},shift={})'.format(self.power,
+                                                         self.scale,
+                                                         self.shift)
+
 
 class AlexNet(nn.Module):
     def __init__(self, features=None, classifier=None, task_name=None):
@@ -167,7 +172,7 @@ class AlexNet(nn.Module):
                 nn.BatchNorm2d(256, eps=9.99999974738e-06,
                                momentum=0.999000012875, affine=False,
                                track_running_stats=True),
-                Power(),
+                Power(power=1.0, scale=0.5, shift=0.0),
             ])
             self.classifier = nn.Sequential(*[
                 nn.Linear(in_features=9216, out_features=4096, bias=True),
