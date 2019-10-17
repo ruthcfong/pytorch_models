@@ -24,4 +24,4 @@ TODO-models:
 TODO-misc:
 * define `get_transform` to provide the right data transformations for each task.
 
-Models were taken from [http://netdissect.csail.mit.edu](http://netdissect.csail.mit.edu).
+Model definition and weights were taken from [http://netdissect.csail.mit.edu](http://netdissect.csail.mit.edu).
