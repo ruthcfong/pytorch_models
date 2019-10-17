@@ -98,3 +98,11 @@ def net_forward(net, img_paths, transformer=None):
     res = net.forward()
 
     return net, res
+
+
+def net_backward(net, end_blob, gradient):
+    net.blobs[end_blob].diff[...] = gradient
+    res = net.backward()
+
+    return net, res
+
