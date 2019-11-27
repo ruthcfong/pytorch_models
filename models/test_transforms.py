@@ -38,7 +38,6 @@ def test_caffe_pytorch_equivalency(task_name):
     caffe_net.blobs["data"].reshape(1, 3, 227, 227)
     x_caffe = caffe_transformer.preprocess("data", DEFAULT_IMG_PATH)
 
-    # torch_transform = get_transform(task_name=task_name, size=227)
     torch_transform = get_transform(task_name=task_name, size=227)
     x_torch = torch_transform(_load_torch_image())
 
