@@ -124,7 +124,7 @@ class CaffeResize(object):
 
 
 
-def get_transform(task_name, size=None):
+def get_transform(task_name, size=227):
     """Get pytorch transform for ported caffe model (copied from TorchRay)."""
     # TODO(ruthfong): Compare to https://github.com/CSAILVision/NetDissect/blob/release1/src/loadseg.py#L623-L638
     # From here: https://github.com/CSAILVision/NetDissect/blob/release1/script/rundissect.sh#L165
