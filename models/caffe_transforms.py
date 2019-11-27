@@ -2,12 +2,8 @@ import caffe
 import numpy as np
 from scipy import misc
 
-# Import names of self-supervised tasks.
+# Import names of self-supervised tasks and default bgr mean.
 from . import *
-
-# Mean ImageNet BGR values averaged over spatial locations, as stored in
-# https://github.com/BVLC/caffe/blob/master/python/caffe/imagenet/ilsvrc_2012_mean.npy
-CAFFE_IMAGENET_BGR_MEAN = np.array([104.00698793, 116.66876762, 122.67891434])
 
 
 class CaffeTransformer(object):
@@ -21,14 +17,14 @@ class CaffeTransformer(object):
     2., to wrap around :class:`caffe.io.Transformer` by setting
     :attr:`transformer` during initialization.
     """
-    def __init__(self, net=None, blob="data"):
+    def __init__(self, net, blob="data"):
         self.net = net
         self.transformer = None
         self.blob = blob
 
     def load_image(self, path):
         assert isinstance(path, str)
-        caffe.io.load_image(path)
+        return caffe.io.load_image(path)
 
     def prep_image(self, x):
         raise NotImplementedError
@@ -62,11 +58,13 @@ class CaffeTransformer(object):
 
 
 class AudioCaffeTransformer(CaffeTransformer):
-    def __init__(self, net=None, blob="data"):
+    def __init__(self, *args, **kwargs):
         """Different mean center values from prototxt."""
-        super(AudioCaffeTransformer, self).__init__(net=net, blob=blob)
+        super(AudioCaffeTransformer, self).__init__(*args, **kwargs)
         self.bgr_mean = np.array([104., 117., 123.])
-        self.transformer = get_imagenet_transformer(mean_center=True,
+        self.transformer = get_imagenet_transformer(self.net,
+                                                    blob=self.blob,
+                                                    mean_center=True,
                                                     scale=True,
                                                     mu=self.bgr_mean)
 
@@ -80,6 +78,12 @@ class DeepContextCaffeTransformer(CaffeTransformer):
         Modified from source code:
         https://github.com/cdoersch/deepcontext/blob/master/train.py#L89-L111
         """
+        # Resize input if necessary.
+        input_spatial_shape = x.shape[:2]
+        target_spatial_shape = self.net.blobs[self.blob].shape[2:]
+        if input_spatial_shape != target_spatial_shape:
+            x = caffe.io.resize_image(x, target_spatial_shape)
+
         for i in range(0, 3):
             x[:, :, i] -= np.mean(x[:, :, i])
 
@@ -90,17 +94,20 @@ class DeepContextCaffeTransformer(CaffeTransformer):
         return x.transpose(2, 0, 1)
 
 
-class ObjectCentricCaffeTransformer(CaffeTransformer):
-    def __init__(self, net=None, blob="data"):
-        super(ObjectCentricCaffeTransformer, self).__init__(net=net, blob=blob)
-        self.transformer = get_imagenet_transformer(mean_center=True,
-                                                    scale=True)
+class DefaultCaffeTransformer(CaffeTransformer):
+    def __init__(self, *args, **kwargs):
+        super(DefaultCaffeTransformer, self).__init__(*args, **kwargs)
+        self.transformer = get_imagenet_transformer(self.net,
+                                                    blob=self.blob,
+                                                    mean_center=True,
+                                                    scale=True,
+                                                    mu=None)
 
 
 TRANSFORMERS = {
     AUDIO: AudioCaffeTransformer,
     DEEPCONTEXT: DeepContextCaffeTransformer,
-    OBJECTCENTRIC: ObjectCentricCaffeTransformer,
+    OBJECTCENTRIC: DefaultCaffeTransformer,
 }
 
 
@@ -110,18 +117,23 @@ def get_transformer(task_name, net, blob="data"):
     Args:
         task_name (str): name of self-supervised task.
         net (:class:`caffe.Net`): caffe network.
-        blob (str): name of blob.
+        blob (str, optional): name of blob. Default: ``"data"``.
+        resize (bool): If True, resize image. Default:: ``False``.
     """
     assert task_name in TASK_NAMES
 
     if not task_name in TRANSFORMERS:
-        raise NotImplementedError("{} is not currently supported; {} is the "
-                                  "list of supported tasks.".format(
-            task_name,
-            str(TRANSFORMERS.keys())
-        ))
+        return DefaultCaffeTransformer(net=net, blob=blob)
+        # TODO(ruthfong): Remove.
+        if False:
+            raise NotImplementedError("{} is not currently supported; {} is the "
+                                      "list of supported tasks.".format(
+                task_name,
+                str(TRANSFORMERS.keys())
+            ))
     else:
-        transformer = TRANSFORMERS[task_name](net=net, blob=blob)
+        transformer = TRANSFORMERS[task_name](net=net,
+                                              blob=blob)
         return transformer
 
 
