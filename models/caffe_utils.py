@@ -1,5 +1,8 @@
 import os
 
+# Only show warnings + errors.
+os.environ["GLOG_minloglevel"] = "2"
+
 import caffe
 
 from .caffe_transforms import get_imagenet_transformer
