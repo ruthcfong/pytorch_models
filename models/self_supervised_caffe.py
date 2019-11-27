@@ -1,33 +1,40 @@
 import argparse
-from collections import OrderedDict
 import os
 
-import numpy as np
+# Only show warnings + errors.
+os.environ["GLOG_minloglevel"] = "2"
+import caffe
 from caffe.proto import caffe_pb2
 import google.protobuf.text_format as txtf
+import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
 import torch
 import torch.nn as nn
 
 import caffe_utils as cutils
 
+from .caffe_transforms import get_transformer
 from .common import attach_debug_probes
-from .self_supervised import PUZZLE, TASK_NAMES, AlexNet, alexnet, Power
+from .self_supervised import COLORIZATION, PUZZLE, TASK_NAMES, AlexNet, alexnet, Power
 from .transforms import get_transform
 
 DEFAULT_CAFFE_MODELS_DIR = '/scratch/local/ssd/ruthfong/models/net_dissect/caffe'
 DEFAULT_PYTORCH_MODELS_DIR = '/scratch/local/ssd/ruthfong/models/net_dissect/pytorch'
 DEFAULT_IMG_PATH = './data/dog_cat.jpeg'
 
-DEFAULT_MAX_ACT_DIFF_THRESHOLD = 1e-4
-DEFAULT_MAX_GRAD_DIFF_THRESHOLD = 1e-5
+DEFAULT_REL_MAX_ACT_DIFF_THRESHOLD = 1e-6
+DEFAULT_REL_MAX_GRAD_DIFF_THRESHOLD = 1e-6
 
 # default caffe values
 POOL_MAX = 0
 POOL_AVE = 1
 POOL_STOCHASTIC = 2
 
-
+def normalize(x):
+    x_max = x.max()
+    x_min = x.min()
+    return (x - x_min) / (x_max - x_min)
 def extract_param(param, default_value=None):
     if isinstance(param, int) or isinstance(param, float):
         return param
@@ -58,6 +65,7 @@ get_track_running_stats = lambda p: extract_param(p.use_global_stats, False)
 get_power = lambda p: extract_param(p.power, 1)
 get_scale = lambda p: extract_param(p.scale, 1)
 get_shift = lambda p: extract_param(p.shift, 0)
+get_dropout_p = lambda p: extract_param(p.dropout_ratio, 0.5)
 
 
 def get_net_proto(prototxt_path):
@@ -70,8 +78,8 @@ def get_net_proto(prototxt_path):
     return net_p
 
 
-def get_torch_net(net_p):
-    prev_dim = 3
+def get_torch_net(net_p, num_input_channels=3):
+    prev_dim = num_input_channels
     inplace = True
     new_features_layers = []
     learnable_features_layers = {}
@@ -170,8 +178,15 @@ def get_torch_net(net_p):
             new_layer = Power(power=power,
                               scale=scale,
                               shift=shift)
+        elif layer.type == 'Dropout':
+            p = layer.dropout_param
+            dropout_p = get_dropout_p(p)
+            new_layer = nn.Dropout(p=dropout_p)
         elif layer.type == 'Input':
             continue
+        elif (layer.type == 'Python'
+              and layer.python_param.layer == 'BGR2LabLayer'):
+            import pdb; pdb.set_trace();
         else:
             # TODO(ruthfong): Remove
             print(layer.type)
@@ -254,10 +269,11 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
                              task_name=PUZZLE,
                              caffe_models_dir=DEFAULT_CAFFE_MODELS_DIR,
                              pytorch_models_dir=DEFAULT_PYTORCH_MODELS_DIR,
-                             max_act_diff_threshold=DEFAULT_MAX_ACT_DIFF_THRESHOLD,
-                             max_grad_diff_threshold=DEFAULT_MAX_GRAD_DIFF_THRESHOLD,
+                             max_act_diff_threshold=DEFAULT_REL_MAX_ACT_DIFF_THRESHOLD,
+                             max_grad_diff_threshold=DEFAULT_REL_MAX_GRAD_DIFF_THRESHOLD,
                              test_conversion=False,
                              use_caffe_processing=False,
+                             plot_grad=False,
                              debug=False,
                              gpu=None):
     # TODO(ruthfong): Check GPU placement.
@@ -269,12 +285,20 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
 
     if test_conversion:
         torch_net = alexnet(task_name=task_name, pretrained=True)
+        if debug:
+            prototxt_path = os.path.join(caffe_models_dir,
+                                         task_name + '.prototxt')
+            net_p = get_net_proto(prototxt_path)
+            num_input_channels = 1 if task_name == COLORIZATION else 3
+            _, _, learnable_features, learnable_classifier = get_torch_net(net_p, num_input_channels=num_input_channels)
     else:
         # Convert caffe network into pytorch feature extractor.
         prototxt_path = os.path.join(caffe_models_dir,
                                      task_name + '.prototxt')
         net_p = get_net_proto(prototxt_path)
-        features, classifier, learnable_features, learnable_classifier = get_torch_net(net_p)
+        num_input_channels = 1 if task_name == COLORIZATION else 3
+        features, classifier, learnable_features, learnable_classifier = get_torch_net(net_p,
+                                                                                       num_input_channels=num_input_channels)
         # import pdb; pdb.set_trace();
         print('Loading features weights')
         features = load_weights(caffe_net, features, learnable_features)
@@ -295,7 +319,8 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
     torch_net.eval()
 
     # Forward pass through caffe network.
-    caffe_net, caffe_res = cutils.net_forward(caffe_net, img_path)
+    transformer = get_transformer(task_name=task_name, net=caffe_net)
+    caffe_net, caffe_res = cutils.net_forward(caffe_net, img_path, transformer=transformer)
     assert len(caffe_res) == 1
     caffe_end_blob = caffe_res.keys()[0]
 
@@ -305,7 +330,7 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
         x = x[:, [2, 1, 0], :, :]
     else:
         assert isinstance(img_path, str)
-        transform = get_transform(227)
+        transform = get_transform(task_name=task_name, size=227)
         img = Image.open(img_path).convert('RGB')
         x = transform(img).unsqueeze(0)
 
@@ -325,19 +350,44 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
 
     # Check maximum difference.
     max_act_diff = np.abs(torch_res.cpu().data.numpy() - caffe_res[caffe_end_blob]).max()
+    act_mag = np.abs(torch_res.cpu().data.numpy()).max()
+    rel_max_act_diff = max_act_diff / act_mag
     mean_act_diff = np.abs(torch_res.cpu().data.numpy() - caffe_res[caffe_end_blob]).mean()
     max_grad_diff = np.abs(x.grad.cpu().data.numpy() - caffe_res_back[caffe_start_blob][:, [2, 1, 0], :, :]).max()
+    grad_mag = np.abs(x.grad.cpu().data.numpy()).max()
+    rel_max_grad_diff = max_grad_diff / grad_mag
     mean_grad_diff = np.abs(x.grad.cpu().data.numpy() - caffe_res_back[caffe_start_blob][:, [2, 1, 0], :, :]).mean()
+    if plot_grad:
+        f, ax = plt.subplots(1, 3, figsize=(3*4, 4))
+        ax[0].imshow(np.transpose(normalize(x.grad.cpu().data.numpy()[0]), (1, 2, 0)))
+        ax[1].imshow(np.transpose(normalize(caffe_res_back[caffe_start_blob][0, [2,1,0], :, :]), (1, 2, 0)))
+        ax[2].imshow(np.transpose(normalize(x.grad.cpu().data.numpy()[0] - caffe_res_back[caffe_start_blob][0, [2,1,0],:, :]), (1, 2, 0)))
+        ax[0].set_ylabel('{} ({})'.format(task_name, caffe_start_blob))
+        ax[0].set_title('pytorch')
+        ax[0].set_xlabel('use_caffe_processing {}'.format(use_caffe_processing))
+        ax[1].set_title('caffe')
+        ax[2].set_title('diff')
+        ax[2].set_xlabel('Diff-Abs: {:.1e} Rel: {:.1e}'.format(max_grad_diff, rel_max_grad_diff))
+        for a in ax:
+            a.set_xticks([])
+            a.set_yticks([])
+        plt.show()
 
-    print('Max Act Diff (' + caffe_end_blob + '): ' + str(max_act_diff))
-    print('Mean Act Diff (' + caffe_end_blob + '): ' + str(mean_act_diff))
-    print('Max Grad Diff (' + caffe_start_blob + '): ' + str(max_grad_diff))
-    print('Mean Grad Diff (' + caffe_start_blob + '): ' + str(mean_grad_diff))
+    print('Max Act Diff ({}): {:.2e}'.format(caffe_end_blob, max_act_diff))
+    print('Mean Act Diff ({}): {:.2e}'.format(caffe_end_blob, mean_act_diff))
+    print('Max Act Mag ({}): {:.2e}'.format(caffe_end_blob, act_mag))
+    print('Rel Max Act Diff ({}): {:.2e}'.format(caffe_end_blob, rel_max_act_diff))
+    print('Max Grad Diff ({}): {:.2e}'.format(caffe_start_blob, max_grad_diff))
+    print('Mean Grad Diff ({}): {:.2e}'.format(caffe_start_blob, mean_grad_diff))
+    print('Max Grad Mag ({}): {:.2e}'.format(caffe_start_blob, grad_mag))
+    print('Rel Max Grad Diff ({}): {:.2e}'.format(caffe_start_blob, rel_max_grad_diff))
+
     try:
-        assert max_act_diff < max_act_diff_threshold
-        # TODO(ruthfong): Figure out why backward gradients don't match for AUDIO and EGOMOTION.
-        assert max_grad_diff < max_grad_diff_threshold
+        assert rel_max_act_diff < max_act_diff_threshold
+        assert rel_max_grad_diff < max_grad_diff_threshold
     except:
+        # TODO(ruthfong): Remove.
+        # TODO(ruthfong): Figure out why backward gradients don't match AUDIO and EGOMOTION.
         import pdb; pdb.set_trace();
         pass
 
@@ -366,11 +416,13 @@ def convert_caffe_to_pytorch(img_path=DEFAULT_IMG_PATH,
                                   - caffe_net.blobs[caffe_layer_name].data)
                 grad_diff = np.abs(debug_probes[torch_layer_name].data[0].grad.cpu().data.numpy()
                                   - caffe_net.blobs[caffe_layer_name].diff)
+            act_mag = np.abs(debug_probes[torch_layer_name].data[0].grad.cpu().data.numpy()).max()
+            grad_mag = np.abs(debug_probes[torch_layer_name].data[0].grad.cpu().data.numpy()).max()
             print('Layer - Caffe: {}\tPyTorch {}'.format(caffe_layer_name, torch_layer_name))
-            print('Diff - Act Max: {}\tMean: {}'.format(act_diff.max(), act_diff.mean()))
-            print('Diff - Grad Max: {}\tMean: {}'.format(grad_diff.max(), grad_diff.min()))
-
-        import pdb; pdb.set_trace();
+            print('Abs Diff - Act Max: {:.2e}\tMean: {:.2e}'.format(act_diff.max(), act_diff.mean()))
+            print('Rel Diff - Act Max: {:.2e}\tMean: {:.2e}'.format(act_diff.max()/act_mag, act_diff.mean()/act_mag))
+            print('Abs Diff - Grad Max: {:.2e}\tMean: {:.2e}'.format(grad_diff.max(), grad_diff.mean()))
+            print('Rel Diff - Grad Max: {:.2e}\tMean: {:.2e}'.format(grad_diff.max()/grad_mag, grad_diff.mean()/grad_mag))
 
     # Save path.
     if not test_conversion:
@@ -391,10 +443,10 @@ if __name__ == '__main__':
                         default=DEFAULT_CAFFE_MODELS_DIR)
     parser.add_argument('--max_act_diff_threshold',
                         type=float,
-                        default=DEFAULT_MAX_ACT_DIFF_THRESHOLD)
+                        default=DEFAULT_REL_MAX_ACT_DIFF_THRESHOLD)
     parser.add_argument('--max_grad_diff_threshold',
                         type=float,
-                        default=DEFAULT_MAX_GRAD_DIFF_THRESHOLD)
+                        default=DEFAULT_REL_MAX_GRAD_DIFF_THRESHOLD)
     parser.add_argument('--use_caffe_processing',
                         action='store_true',
                         default=False)
@@ -402,6 +454,9 @@ if __name__ == '__main__':
                         action='store_true',
                         default=False)
     parser.add_argument('--debug',
+                        action='store_true',
+                        default=False)
+    parser.add_argument('--plot_grad',
                         action='store_true',
                         default=False)
     parser.add_argument('--gpu', type=int, default=None)
@@ -414,4 +469,5 @@ if __name__ == '__main__':
                              test_conversion=args.test_conversion,
                              use_caffe_processing=args.use_caffe_processing,
                              debug=args.debug,
+                             plot_grad=args.plot_grad,
                              gpu=args.gpu)
