@@ -3,30 +3,8 @@ import torch.nn as nn
 
 from torchvision.models.utils import load_state_dict_from_url
 
+from . import *
 
-AUDIO = 'weakly_audio'
-COLORIZATION = 'weakly_colorization'  # TODO(ruthfong): Add.
-DEEPCONTEXT = 'weakly_deepcontext'
-EGOMOTION = 'weakly_egomotion'
-MOVING = 'weakly_learningbymoving'
-OBJECTCENTRIC = 'weakly_objectcentric'
-PUZZLE = 'weakly_solvingpuzzle'
-SPLITBRAIN = 'weakly_splitbrain'  # TODO(ruthfong): Add.
-VIDEOORDER = 'weakly_videoorder'
-VIDEOTRACKING = 'weakly_videotracking'
-
-TASK_NAMES = [
-    AUDIO,
-    COLORIZATION,
-    DEEPCONTEXT,
-    EGOMOTION,
-    MOVING,
-    OBJECTCENTRIC,
-    PUZZLE,
-    SPLITBRAIN,
-    VIDEOORDER,
-    VIDEOTRACKING,
-]
 
 model_urls = {
     AUDIO: 'https://github.com/ruthcfong/pytorch_models/releases/download/v2.0/alexnet-weakly_audio-eb78354d.pt',  # TODO(ruthfong): Debug backward.
