@@ -35,6 +35,8 @@ def normalize(x):
     x_max = x.max()
     x_min = x.min()
     return (x - x_min) / (x_max - x_min)
+
+
 def extract_param(param, default_value=None):
     if isinstance(param, int) or isinstance(param, float):
         return param
